@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AnesthTrack 2.0 — Panel de Riesgo Anestésico</title>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     ⚠️  CONFIGURACIÓN — PEGA AQUÍ TU URL /exec DEL BACKEND
+     Reemplaza el texto entre comillas por la URL que termina en /exec.
+     Ejemplo:  const API_URL = 'https://script.google.com/macros/s/AKfy.../exec';
+═════════════════════════════════════════════════════════════════════════ -->
+<script>
+  const API_URL = 'https://script.google.com/macros/s/AKfycbxJLXE10g90FytFr169iFhwq_0P1WfM8AMSvzAp6PEp69ZDAu187uLkIy5psjpNQ2p8vA/exec';
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#eef2f6; --surface:#ffffff; --surface-2:#f7fafc;
+    --ink:#15212e; --ink-soft:#5a6b7b; --line:#dde5ec;
+    --cyan:#0288d1; --cyan-deep:#01579b; --cyan-soft:#e3f2fd;
+    --ok:#2e7d32; --ok-soft:#e8f5e9;
+    --warn:#f59e0b; --warn-soft:#fff8e1;
+    --high:#ef6c00; --high-soft:#fff3e0;
+    --crit:#c62828; --crit-soft:#ffebee;
+    --info:#1565c0;
+    --shadow:0 1px 3px rgba(21,33,46,.06),0 6px 20px rgba(21,33,46,.05);
+    --r:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);
+    line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+
+  /* ── Top bar (vital monitor strip) ── */
+  header{background:var(--cyan-deep);color:#fff;position:sticky;top:0;z-index:20;
+    box-shadow:0 2px 12px rgba(1,87,155,.3)}
+  .vitals-strip{height:4px;background:linear-gradient(90deg,#00e5ff 0%,#0288d1 30%,#2e7d32 60%,#f59e0b 80%,#c62828 100%);opacity:.9}
+  .hwrap{max-width:1180px;margin:0 auto;padding:14px 22px;display:flex;
+    align-items:center;gap:18px;flex-wrap:wrap}
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .brand h1{font-family:'Archivo';font-weight:800;font-size:1.35rem;letter-spacing:-.02em}
+  .brand .ver{font-family:'JetBrains Mono';font-size:.7rem;background:rgba(255,255,255,.18);
+    padding:2px 7px;border-radius:5px;letter-spacing:.05em}
+  .conn{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:.78rem;
+    font-family:'JetBrains Mono'}
+  .dot{width:9px;height:9px;border-radius:50%;background:#9aa;box-shadow:0 0 0 0 rgba(0,229,255,.6)}
+  .dot.live{background:#00e676;animation:pulse 2s infinite}
+  .dot.err{background:#ff5252}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(0,230,118,.5)}70%{box-shadow:0 0 0 7px rgba(0,230,118,0)}100%{box-shadow:0 0 0 0 rgba(0,230,118,0)}}
+
+  .selector{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.12);
+    padding:7px 12px;border-radius:9px}
+  .selector label{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;opacity:.85}
+  .selector select{background:#fff;color:var(--ink);border:none;border-radius:6px;
+    padding:7px 10px;font-family:'Inter';font-weight:600;font-size:.85rem;min-width:170px;cursor:pointer}
+
+  /* ── Tabs ── */
+  nav{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:60px;z-index:15}
+  .twrap{max-width:1180px;margin:0 auto;padding:0 22px;display:flex;gap:4px;overflow-x:auto}
+  .tab{appearance:none;background:none;border:none;padding:15px 16px;font-family:'Archivo';
+    font-weight:600;font-size:.88rem;color:var(--ink-soft);cursor:pointer;white-space:nowrap;
+    border-bottom:3px solid transparent;transition:.15s}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--cyan-deep);border-bottom-color:var(--cyan)}
+
+  main{max-width:1180px;margin:0 auto;padding:26px 22px 80px}
+  .view{display:none;animation:fade .3s}
+  .view.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .section-title{font-family:'Archivo';font-weight:700;font-size:1.05rem;margin:6px 0 16px;
+    display:flex;align-items:center;gap:9px}
+  .section-title::before{content:'';width:4px;height:18px;background:var(--cyan);border-radius:2px}
+  .sub{color:var(--ink-soft);font-size:.85rem;margin:-10px 0 18px}
+
+  /* ── Metric readout cards (monitor style) ── */
+  .grid{display:grid;gap:14px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:860px){.g4,.g3{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.g4,.g3,.g2{grid-template-columns:1fr}}
+
+  .metric{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+    padding:16px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .metric .lab{font-size:.7rem;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-soft);
+    font-weight:600}
+  .metric .val{font-family:'JetBrains Mono';font-weight:700;font-size:2.1rem;line-height:1.1;
+    margin-top:8px;color:var(--ink)}
+  .metric .val .u{font-size:1rem;color:var(--ink-soft);margin-left:3px}
+  .metric .ctx{font-size:.76rem;color:var(--ink-soft);margin-top:5px}
+  .metric .edge{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--cyan)}
+  .metric.ok .edge{background:var(--ok)} .metric.warn .edge{background:var(--warn)}
+  .metric.high .edge{background:var(--high)} .metric.crit .edge{background:var(--crit)}
+  .metric.ok .val{color:var(--ok)} .metric.crit .val{color:var(--crit)} .metric.high .val{color:var(--high)}
+
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+    padding:20px;box-shadow:var(--shadow);margin-bottom:16px}
+  .card h3{font-family:'Archivo';font-weight:700;font-size:.95rem;margin-bottom:4px}
+  .card .hint{font-size:.78rem;color:var(--ink-soft);margin-bottom:14px}
+  .chart-box{position:relative;height:280px}
+  .chart-box.tall{height:340px}
+
+  /* ── Comparison bars ── */
+  .cmp-row{display:flex;align-items:center;gap:12px;margin:9px 0}
+  .cmp-name{width:90px;font-size:.8rem;color:var(--ink-soft);flex-shrink:0}
+  .cmp-name.me{color:var(--cyan-deep);font-weight:700}
+  .cmp-track{flex:1;background:var(--surface-2);border-radius:6px;height:22px;overflow:hidden;position:relative}
+  .cmp-fill{height:100%;border-radius:6px;background:var(--line);transition:width .6s}
+  .cmp-fill.me{background:linear-gradient(90deg,var(--cyan),var(--cyan-deep))}
+  .cmp-val{width:54px;text-align:right;font-family:'JetBrains Mono';font-size:.82rem;font-weight:700}
+
+  /* ── Alerts ── */
+  .alert-item{display:flex;gap:12px;padding:13px 15px;border-radius:10px;margin-bottom:9px;
+    background:var(--surface-2);border:1px solid var(--line);align-items:flex-start}
+  .alert-item .meta{font-size:.74rem;color:var(--ink-soft);font-family:'JetBrains Mono';flex-shrink:0;width:128px}
+  .alert-item .body{font-size:.86rem;flex:1}
+  .badge{display:inline-block;font-size:.7rem;font-weight:700;padding:2px 8px;border-radius:20px;margin:2px 5px 2px 0}
+  .b-crit{background:var(--crit-soft);color:var(--crit)} .b-high{background:var(--high-soft);color:var(--high)}
+  .b-info{background:var(--cyan-soft);color:var(--info)}
+
+  .pattern{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;
+    border-radius:10px;margin-bottom:8px;background:var(--crit-soft);border:1px solid #ffcdd2}
+  .pattern .p-txt{font-size:.86rem;font-weight:600;color:var(--crit)}
+  .pattern .p-num{font-family:'JetBrains Mono';font-weight:700;font-size:1.1rem;color:var(--crit)}
+
+  table{width:100%;border-collapse:collapse;font-size:.83rem}
+  th{text-align:left;padding:9px 11px;background:var(--surface-2);font-weight:600;
+    color:var(--ink-soft);font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;
+    border-bottom:2px solid var(--line)}
+  td{padding:9px 11px;border-bottom:1px solid var(--line)}
+  tr:hover td{background:var(--surface-2)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:.74rem;font-weight:600;font-family:'JetBrains Mono'}
+  .pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:#b97e00}
+  .pill.high{background:var(--high-soft);color:var(--high)} .pill.crit{background:var(--crit-soft);color:var(--crit)}
+
+  .empty{text-align:center;padding:60px 20px;color:var(--ink-soft)}
+  .empty .big{font-size:2.4rem;margin-bottom:10px}
+  .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--cyan);
+    border-radius:50%;animation:spin .8s linear infinite;margin:50px auto}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .note{font-size:.78rem;color:var(--ink-soft);background:var(--cyan-soft);border-left:3px solid var(--cyan);
+    padding:11px 14px;border-radius:0 8px 8px 0;margin-top:14px}
+  footer{text-align:center;color:var(--ink-soft);font-size:.76rem;padding:30px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="vitals-strip"></div>
+  <div class="hwrap">
+    <div class="brand">
+      <h1>AnesthTrack</h1><span class="ver">v2.0</span>
+    </div>
+    <div class="selector">
+      <label for="anest">Anestesiólogo</label>
+      <select id="anest" onchange="onSelect()"><option value="">— Selecciona —</option></select>
+    </div>
+    <div class="conn">
+      <span class="dot" id="dot"></span><span id="connTxt">Conectando…</span>
+    </div>
+  </div>
+</header>
+
+<nav>
+  <div class="twrap">
+    <button class="tab active" data-v="individual" onclick="switchTab(this)">Mi desempeño</button>
+    <button class="tab" data-v="pares" onclick="switchTab(this)">Comparativa vs. pares</button>
+    <button class="tab" data-v="hospital" onclick="switchTab(this)">Por hospital</button>
+    <button class="tab" data-v="alertas" onclick="switchTab(this)">Alertas y patrones</button>
+  </div>
+</nav>
+
+<main>
+  <div id="loading"><div class="spinner"></div></div>
+
+  <!-- VISTA 1 — INDIVIDUAL -->
+  <section class="view active" id="v-individual" style="display:none">
+    <div id="ind-empty" class="empty">
+      <div class="big">🩺</div>
+      <p>Selecciona tu nombre arriba para ver tu desempeño.</p>
+    </div>
+    <div id="ind-content" style="display:none">
+      <div class="section-title">Resumen de mis casos</div>
+      <div class="grid g4" id="ind-metrics"></div>
+      <div class="grid g2" style="margin-top:16px">
+        <div class="card"><h3>Distribución de riesgo preoperatorio</h3>
+          <div class="hint">Mis pacientes por nivel de riesgo (ASA × Charlson)</div>
+          <div class="chart-box"><canvas id="cIndRiesgo"></canvas></div></div>
+        <div class="card"><h3>Calidad de recuperación</h3>
+          <div class="hint">Aldrete + EVA + Ramsay al entregar el paciente</div>
+          <div class="chart-box"><canvas id="cIndCalidad"></canvas></div></div>
+      </div>
+      <div class="card"><h3>Eventos intraoperatorios en mis casos</h3>
+        <div class="hint">Frecuencia de complicaciones registradas</div>
+        <div class="chart-box"><canvas id="cIndEventos"></canvas></div></div>
+      <div class="note" id="ind-discord"></div>
+    </div>
+  </section>
+
+  <!-- VISTA 2 — PARES -->
+  <section class="view" id="v-pares" style="display:none">
+    <div class="section-title">Tú vs. el grupo (anónimo)</div>
+    <p class="sub">Tu línea aparece identificada. Los demás colegas se muestran de forma anónima.</p>
+    <div class="grid g4" id="par-metrics"></div>
+    <div class="card" style="margin-top:16px"><h3>Tasa de complicaciones por anestesiólogo</h3>
+      <div class="hint">Menor es mejor · tu barra resaltada en azul</div>
+      <div id="par-compl"></div></div>
+    <div class="card"><h3>Aldrete promedio al entregar</h3>
+      <div class="hint">Mayor es mejor (máx. 10)</div>
+      <div id="par-aldrete"></div></div>
+  </section>
+
+  <!-- VISTA 3 — HOSPITAL -->
+  <section class="view" id="v-hospital" style="display:none">
+    <div class="section-title">Benchmarking por hospital</div>
+    <p class="sub">Comparación entre los hospitales donde se registran procedimientos.</p>
+    <div class="card"><h3>Casos y tasa de complicaciones por hospital</h3>
+      <div class="chart-box tall"><canvas id="cHosp"></canvas></div></div>
+    <div class="card"><h3>Detalle por hospital</h3>
+      <div style="overflow-x:auto"><table id="hospTable"></table></div></div>
+  </section>
+
+  <!-- VISTA 4 — ALERTAS -->
+  <section class="view" id="v-alertas" style="display:none">
+    <div class="section-title">Patrones de riesgo recurrentes</div>
+    <p class="sub">Combinaciones riesgo + técnica + evento que se repiten (≥3 casos). Foco de mejora.</p>
+    <div id="patternList"></div>
+    <div class="section-title" style="margin-top:30px">Casos con alertas activas</div>
+    <p class="sub">Registros que dispararon banderas de seguridad clínica.</p>
+    <div id="alertList"></div>
+  </section>
+</main>
+
+<footer>AnesthTrack 2.0 · Registro y análisis de riesgo anestésico · Honduras</footer>
+
+<script>
+let CASOS=[], CHARTS={}, ME='';
+const RIESGO=['Bajo','Moderado','Alto','Muy alto'];
+const RCOLOR={'Bajo':'#2e7d32','Moderado':'#f59e0b','Alto':'#ef6c00','Muy alto':'#c62828'};
+const CCOLOR={'Óptima':'#2e7d32','Aceptable':'#f59e0b','Subóptima':'#c62828'};
+
+// ── Carga inicial ──
+async function init(){
+  if(API_URL.includes('PEGA_AQUI')){ connState('err','Falta configurar API_URL'); 
+    document.getElementById('loading').innerHTML=
+    '<div class="empty"><div class="big">⚙️</div><p>Abre el archivo y pega tu URL <b>/exec</b> en <code>API_URL</code> (arriba del todo).</p></div>'; return; }
+  try{
+    const r=await fetch(API_URL+'?action=casos');
+    const j=await r.json();
+    if(!j.ok) throw new Error(j.error||'respuesta inválida');
+    CASOS=(j.casos||[]).filter(c=>c['Anestesiólogo']);
+    connState('live','Conectado · '+CASOS.length+' casos');
+    buildSelector(); document.getElementById('loading').style.display='none';
+    showView('individual'); renderAll();
+  }catch(e){
+    connState('err','Sin conexión');
+    document.getElementById('loading').innerHTML=
+    '<div class="empty"><div class="big">⚠️</div><p>No pude leer los datos.<br>Verifica que la URL /exec sea correcta y esté implementada como "Cualquier usuario".</p><p style="font-size:.75rem;margin-top:10px;color:#999">'+e.message+'</p></div>';
+  }
+}
+function connState(s,t){const d=document.getElementById('dot');d.className='dot '+(s==='live'?'live':s==='err'?'err':'');
+  document.getElementById('connTxt').textContent=t;}
+
+function buildSelector(){
+  const names=[...new Set(CASOS.map(c=>c['Anestesiólogo']))].sort();
+  const sel=document.getElementById('anest');
+  names.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;sel.appendChild(o);});
+}
+function onSelect(){ ME=document.getElementById('anest').value; renderAll(); }
+
+// ── Tabs ──
+function switchTab(btn){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active'); showView(btn.dataset.v);
+}
+function showView(v){
+  document.querySelectorAll('.view').forEach(s=>{s.classList.remove('active');s.style.display='none';});
+  const el=document.getElementById('v-'+v); el.classList.add('active'); el.style.display='block';
+}
+
+// ── Helpers de agregación ──
+const num=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
+const isCompl=c=>c['Complicación']==='Sí';
+const isDiscord=c=>c['Discordancia_ASA_Charlson']&&c['Discordancia_ASA_Charlson']!=='No';
+function stats(arr){
+  const n=arr.length||1;
+  return {
+    n:arr.length,
+    compl:+(arr.filter(isCompl).length/n*100).toFixed(1),
+    aldrete:+(arr.reduce((s,c)=>s+num(c['Aldrete_Total']),0)/n).toFixed(1),
+    optima:+(arr.filter(c=>c['Calidad_Recuperación']==='Óptima').length/n*100).toFixed(0),
+    discord:+(arr.filter(isDiscord).length/n*100).toFixed(0),
+    dur:+(arr.reduce((s,c)=>s+num(c['Duración_min']),0)/n).toFixed(0)
+  };
+}
+function metric(lab,val,unit,ctx,cls){
+  return `<div class="metric ${cls||''}"><div class="edge"></div><div class="lab">${lab}</div>
+    <div class="val">${val}<span class="u">${unit||''}</span></div><div class="ctx">${ctx||''}</div></div>`;
+}
+
+// ── Render maestro ──
+function renderAll(){ renderIndividual(); renderPares(); renderHospital(); renderAlertas(); }
+
+// ════ VISTA 1 ════
+function renderIndividual(){
+  const empty=document.getElementById('ind-empty'), cont=document.getElementById('ind-content');
+  if(!ME){ empty.style.display='block'; cont.style.display='none'; return; }
+  empty.style.display='none'; cont.style.display='block';
+  const mine=CASOS.filter(c=>c['Anestesiólogo']===ME), s=stats(mine);
+  const cCls=s.compl<=10?'ok':s.compl<=25?'warn':'crit';
+  const aCls=s.aldrete>=9?'ok':s.aldrete>=8?'warn':'crit';
+  document.getElementById('ind-metrics').innerHTML=
+    metric('Mis casos',s.n,'','procedimientos registrados','')+
+    metric('Tasa complicaciones',s.compl,'%','eventos intraoperatorios',cCls)+
+    metric('Aldrete promedio',s.aldrete,'/10','al entregar el paciente',aCls)+
+    metric('Duración media',s.dur,'min','tiempo anestésico','');
+
+  drawDoughnut('cIndRiesgo',countBy(mine,'Riesgo_Preop_Nivel',RIESGO),RIESGO.map(r=>RCOLOR[r]));
+  const calLabels=['Óptima','Aceptable','Subóptima'];
+  drawDoughnut('cIndCalidad',countBy(mine,'Calidad_Recuperación',calLabels),calLabels.map(c=>CCOLOR[c]));
+  drawEventos('cIndEventos',mine);
+
+  const d=mine.filter(isDiscord).length;
+  document.getElementById('ind-discord').innerHTML= d>0
+    ? `🔵 <b>${d} caso(s)</b> con discordancia ASA–Charlson. Revisa si la clasificación ASA reflejó bien la carga de comorbilidad — es tu mejor señal de autocontrol preoperatorio.`
+    : `✓ Sin discordancias ASA–Charlson en tus casos. Tu clasificación preoperatoria es consistente con la carga de comorbilidad registrada.`;
+}
+
+// ════ VISTA 2 ════
+function renderPares(){
+  const s=stats(CASOS); // grupo completo
+  const mine=ME?stats(CASOS.filter(c=>c['Anestesiólogo']===ME)):null;
+  document.getElementById('par-metrics').innerHTML=
+    metricCmp('Tasa complicaciones',mine?mine.compl:'—',s.compl,'%',true)+
+    metricCmp('Aldrete promedio',mine?mine.aldrete:'—',s.aldrete,'',false)+
+    metricCmp('% Recuperación óptima',mine?mine.optima:'—',s.optima,'%',false)+
+    metricCmp('% Discordancias',mine?mine.discord:'—',s.discord,'%',true);
+
+  // barras anonimizadas
+  const byName={};
+  CASOS.forEach(c=>{(byName[c['Anestesiólogo']]=byName[c['Anestesiólogo']]||[]).push(c);});
+  let rows=Object.keys(byName).map(n=>({name:n,...stats(byName[n])}));
+
+  // complicaciones (asc = mejor primero)
+  renderCmpBars('par-compl',[...rows].sort((a,b)=>a.compl-b.compl),'compl','%',
+    Math.max(...rows.map(r=>r.compl),1));
+  // aldrete (desc = mejor primero)
+  renderCmpBars('par-aldrete',[...rows].sort((a,b)=>b.aldrete-a.aldrete),'aldrete','',10);
+}
+function metricCmp(lab,me,grp,unit,lowerBetter){
+  let cls='';
+  if(me!=='—'){ const better=lowerBetter?me<=grp:me>=grp; cls=better?'ok':'high'; }
+  const delta = me!=='—' ? (me-grp).toFixed(1) : '';
+  const sign = delta>0?'+':'';
+  return `<div class="metric ${cls}"><div class="edge"></div><div class="lab">${lab}</div>
+    <div class="val">${me}<span class="u">${unit}</span></div>
+    <div class="ctx">Grupo: ${grp}${unit} ${me!=='—'?`· tú ${sign}${delta}`:''}</div></div>`;
+}
+function renderCmpBars(id,rows,key,unit,max){
+  let h='';
+  rows.forEach(r=>{
+    const isMe=r.name===ME;
+    const label=isMe?'TÚ':'Colega';
+    const pct=Math.min(r[key]/max*100,100);
+    h+=`<div class="cmp-row">
+      <div class="cmp-name ${isMe?'me':''}">${isMe?'★ TÚ':anonId(r.name,rows)}</div>
+      <div class="cmp-track"><div class="cmp-fill ${isMe?'me':''}" style="width:${pct}%;${!isMe?'background:'+barColor(key,r[key]):''}"></div></div>
+      <div class="cmp-val">${r[key]}${unit}</div></div>`;
+  });
+  document.getElementById(id).innerHTML=h;
+}
+const _anon={};
+function anonId(name,rows){
+  if(!_anon[name]){ const others=rows.map(r=>r.name).filter(n=>n!==ME);
+    _anon[name]='Colega '+(others.indexOf(name)+1); }
+  return _anon[name];
+}
+function barColor(key,v){ if(key==='compl') return v<=10?'#a5d6a7':v<=25?'#ffcc80':'#ef9a9a';
+  return v>=9?'#a5d6a7':v>=8?'#ffcc80':'#ef9a9a'; }
+
+// ════ VISTA 3 ════
+function renderHospital(){
+  const byH={};
+  CASOS.forEach(c=>{const h=c['Hospital']||'(sin dato)';(byH[h]=byH[h]||[]).push(c);});
+  const names=Object.keys(byH).sort();
+  const rows=names.map(h=>({name:h,...stats(byH[h])}));
+
+  drawHospChart(rows);
+  let t='<tr><th>Hospital</th><th>Casos</th><th>Complic.</th><th>Aldrete</th><th>Rec. óptima</th><th>Discord.</th></tr>';
+  rows.forEach(r=>{
+    const cc=r.compl<=10?'ok':r.compl<=25?'warn':'crit';
+    const ac=r.aldrete>=9?'ok':r.aldrete>=8?'warn':'crit';
+    t+=`<tr><td><b>${r.name}</b></td><td class="mono">${r.n}</td>
+      <td><span class="pill ${cc}">${r.compl}%</span></td>
+      <td><span class="pill ${ac}">${r.aldrete}</span></td>
+      <td class="mono">${r.optima}%</td><td class="mono">${r.discord}%</td></tr>`;
+  });
+  document.getElementById('hospTable').innerHTML=t;
+}
+
+// ════ VISTA 4 ════
+function renderAlertas(){
+  // patrones
+  const UMBRAL=3, combos={};
+  CASOS.filter(isCompl).forEach(c=>{
+    String(c['Eventos_Detalle']||'').split(',').map(s=>s.trim()).filter(Boolean).forEach(ev=>{
+      const k=`ASA ${c['ASA']||'?'} + ${c['Técnica']||'?'} + ${ev}`;
+      combos[k]=(combos[k]||0)+1;
+    });
+  });
+  const pats=Object.keys(combos).filter(k=>combos[k]>=UMBRAL).sort((a,b)=>combos[b]-combos[a]);
+  const pl=document.getElementById('patternList');
+  pl.innerHTML = pats.length ? pats.map(p=>
+    `<div class="pattern"><div class="p-txt">${p}</div><div class="p-num">${combos[p]}×</div></div>`).join('')
+    : '<div class="empty" style="padding:30px"><p>Aún no hay patrones recurrentes (se necesitan ≥3 repeticiones de una misma combinación).</p></div>';
+
+  // casos con alertas
+  const conAlerta=CASOS.filter(c=>String(c['ALERTAS']||'').trim());
+  const al=document.getElementById('alertList');
+  al.innerHTML = conAlerta.length ? conAlerta.map(c=>{
+    const flags=String(c['ALERTAS']).split('|').map(f=>f.trim()).filter(Boolean);
+    const badges=flags.map(f=>{
+      const cls=f.includes('🔴')?'b-crit':f.includes('🟠')?'b-high':'b-info';
+      return `<span class="badge ${cls}">${f}</span>`;
+    }).join('');
+    const fecha=c['Fecha']?String(c['Fecha']).split('T')[0]:'';
+    return `<div class="alert-item"><div class="meta">${fecha}<br>${c['Hospital']||''}<br>${c['Especialidad']||''}</div>
+      <div class="body"><div style="margin-bottom:5px"><b>ASA ${c['ASA']}</b> · ${c['Técnica']} · ${c['Iniciales']||''}</div>${badges}</div></div>`;
+  }).join('') : '<div class="empty" style="padding:30px"><p>Sin alertas activas. ✓</p></div>';
+}
+
+// ── Charts ──
+function countBy(arr,field,labels){return labels.map(l=>arr.filter(c=>c[field]===l).length);}
+function destroy(id){if(CHARTS[id]){CHARTS[id].destroy();delete CHARTS[id];}}
+function drawDoughnut(id,data,colors){
+  destroy(id);const ctx=document.getElementById(id);if(!ctx)return;
+  const total=data.reduce((a,b)=>a+b,0);
+  if(total===0){noData(ctx);return;}
+  CHARTS[id]=new Chart(ctx,{type:'doughnut',
+    data:{labels:id.includes('Riesgo')?RIESGO:['Óptima','Aceptable','Subóptima'],
+      datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'62%',
+      plugins:{legend:{position:'bottom',labels:{font:{family:'Inter',size:12},padding:14,usePointStyle:true}}}}});
+}
+function drawEventos(id,arr){
+  destroy(id);const ctx=document.getElementById(id);if(!ctx)return;
+  const cnt={};arr.forEach(c=>String(c['Eventos_Detalle']||'').split(',').map(s=>s.trim()).filter(Boolean).forEach(e=>cnt[e]=(cnt[e]||0)+1));
+  const labels=Object.keys(cnt);
+  if(!labels.length){noData(ctx);return;}
+  CHARTS[id]=new Chart(ctx,{type:'bar',
+    data:{labels,datasets:[{data:labels.map(l=>cnt[l]),backgroundColor:'#0288d1',borderRadius:6}]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+      plugins:{legend:{display:false}},scales:{x:{ticks:{precision:0,font:{family:'JetBrains Mono'}}},y:{ticks:{font:{family:'Inter'}}}}}});
+}
+function drawHospChart(rows){
+  destroy('cHosp');const ctx=document.getElementById('cHosp');if(!ctx)return;
+  if(!rows.length){noData(ctx);return;}
+  CHARTS['cHosp']=new Chart(ctx,{
+    data:{labels:rows.map(r=>r.name),
+      datasets:[
+        {type:'bar',label:'Casos',data:rows.map(r=>r.n),backgroundColor:'#90caf9',borderRadius:5,yAxisID:'y'},
+        {type:'line',label:'% Complicaciones',data:rows.map(r=>r.compl),borderColor:'#c62828',
+          backgroundColor:'#c62828',tension:.3,yAxisID:'y1',pointRadius:5}
+      ]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{usePointStyle:true,font:{family:'Inter'}}}},
+      scales:{y:{position:'left',title:{display:true,text:'Casos'},ticks:{precision:0}},
+        y1:{position:'right',title:{display:true,text:'% Complic.'},grid:{drawOnChartArea:false},min:0}}}});
+}
+function noData(ctx){const p=ctx.parentElement;p.innerHTML='<div class="empty" style="padding:40px"><p>Sin datos suficientes</p></div>';}
+
+init();
+</script>
+</body>
+</html>
